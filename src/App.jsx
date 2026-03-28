@@ -7,6 +7,7 @@ import { QRCodeSVG } from 'qrcode.react';
  * - Real-time QR code generation as user types
  * - Advanced customization (colors, size, error correction, border)
  * - Preset system with built-in and custom presets
+ * - QR code image scanning capability
  * - Download QR code as PNG image with current settings
  * - Color contrast validation for scannability
  * - Responsive design for desktop and mobile
@@ -99,6 +100,18 @@ const BUILT_IN_PRESETS = [
   }
 ];
 
+// Sample QR codes for quick testing
+const SAMPLE_QR_CODES = [
+  { id: 'website', label: 'Website', value: 'https://example.com', icon: '🌐' },
+  { id: 'wifi', label: 'WiFi', value: 'WIFI:T:WPA;S:MyNetwork;P:password;;', icon: '📶' },
+  { id: 'email', label: 'Email', value: 'mailto:example@email.com', icon: '✉️' },
+  { id: 'phone', label: 'Phone', value: 'tel:+1234567890', icon: '📞' },
+  { id: 'text', label: 'Text', value: 'Hello, World!', icon: '💬' },
+  { id: 'vcard', label: 'Contact', value: 'BEGIN:VCARD\\nVERSION:3.0\\nN:Doe;John;;\\nTEL:+1234567890\\nEMAIL:john@example.com\\nEND:VCARD', icon: '👤' },
+  { id: 'sms', label: 'SMS', value: 'SMSTO:+1234567890:Hello!', icon: '💭' },
+  { id: 'location', label: 'Location', value: 'geo:37.7749,-122.4194', icon: '📍' },
+];
+
 // Calculate relative luminance for contrast ratio
 const getLuminance = (hexColor) => {
   const hex = hexColor.replace('#', '');
@@ -164,6 +177,12 @@ function App() {
   const [customPresets, setCustomPresets] = useState([]);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
+  
+  // Scanner state
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannedData, setScannedData] = useState('');
+  const [scannerError, setScannerError] = useState('');
+  
   const qrRef = useRef(null);
   
   // Load custom presets from localStorage on mount
@@ -178,7 +197,6 @@ function App() {
       }
     } catch (err) {
       console.error('Failed to load custom presets:', err);
-      // Gracefully handle corrupted data
       localStorage.removeItem(STORAGE_KEY);
     }
   }, []);
@@ -212,12 +230,32 @@ function App() {
       setError('');
     }
   }, []);
+
+  // Handle sample QR code selection
+  const handleSampleSelect = useCallback((sample) => {
+    setInputText(sample.value);
+    setError('');
+    setActivePreset(null);
+  }, []);
+  
+  // Handle scanned text input for generation
+  const handleScannedTextChange = useCallback((e) => {
+    const value = e.target.value;
+    setInputText(value);
+    setScannedData(value);
+    
+    if (value.length > 2953) {
+      setError('Text is too long. QR codes have a maximum capacity.');
+    } else {
+      setError('');
+    }
+  }, []);
   
   // Handle foreground color change
   const handleFgColorChange = useCallback((e) => {
     const newColor = e.target.value;
     setFgColor(newColor);
-    setActivePreset(null); // Clear preset when manually changing colors
+    setActivePreset(null);
   }, []);
   
   // Handle background color change
@@ -305,6 +343,49 @@ function App() {
     setActivePreset(null);
   }, []);
   
+  // Handle image upload and scan
+  const handleImageUpload = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setScannerError('');
+    setScannedData('');
+    
+    // Create a canvas to read the image
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const img = new Image();
+      img.onload = async () => {
+        try {
+          // Dynamic import for html5-qrcode
+          const { Html5Qrcode } = await import('html5-qrcode');
+          const scanner = new Html5Qrcode('qr-scanner-hidden');
+          
+          await scanner.scanFile(file, true)
+            .then(decodedText => {
+              setScannedData(decodedText);
+              setInputText(decodedText);
+            })
+            .catch(err => {
+              console.error('Image scan error:', err);
+              setScannerError('Could not read QR code from image. Please try a different image.');
+            });
+        } catch (err) {
+          console.error('Failed to load scanner:', err);
+          setScannerError('Scanner not available. Please try again later.');
+        }
+      };
+      img.onerror = () => {
+        setScannerError('Failed to load image. Please try a different file.');
+      };
+      img.src = event.target?.result || '';
+    };
+    reader.onerror = () => {
+      setScannerError('Failed to read file. Please try again.');
+    };
+    reader.readAsDataURL(file);
+  }, []);
+  
   // Validate that input can generate a scannable QR code
   const isValidInput = inputText.trim().length > 0 && !error;
   const isScannable = isValidInput && colorValidation.valid;
@@ -377,246 +458,352 @@ function App() {
       {/* Header */}
       <header className="app-header">
         <h1 className="app-title">QR Code Generator</h1>
-        <p className="app-subtitle">Generate and download customizable QR codes instantly</p>
+        <p className="app-subtitle">Generate, customize, and scan QR codes instantly</p>
       </header>
       
       {/* Main Content */}
       <main className="main-content">
         {/* Input Section */}
         <section className="input-section">
-          <div className="input-card">
-            <label htmlFor="qr-input" className="input-label">
-              Enter your text or URL
-            </label>
-            <div className="input-wrapper">
-              <textarea
-                id="qr-input"
-                className={`text-input text-area ${error ? 'error' : ''}`}
-                placeholder="Type anything here..."
-                value={inputText}
-                onChange={handleInputChange}
-                maxLength={2953}
-                aria-describedby="input-hint"
-                rows={3}
-              />
-            </div>
-            
-            {error && (
-              <p className="error-message" role="alert">
-                ⚠️ {error}
-              </p>
-            )}
-            
-            <p id="input-hint" className="input-hint">
-              {inputText.length > 0 
-                ? `${inputText.length} characters`
-                : 'Enter any text, URL, or data to generate a QR code'}
-            </p>
-            
-            {/* Customization Panel Toggle */}
+          {/* Mode Toggle */}
+          <div className="mode-toggle">
             <button 
-              className="settings-toggle"
-              onClick={() => setShowSettings(!showSettings)}
-              aria-expanded={showSettings}
+              className={`mode-button ${!showScanner ? 'active' : ''}`}
+              onClick={() => {
+                if (showScanner) setShowScanner(false);
+              }}
             >
-              <svg 
-                className={`settings-icon ${showSettings ? 'rotated' : ''}`}
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  strokeWidth={2} 
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" 
-                />
-                <path 
-                  strokeLinecap="round" 
-                  strokeLinejoin="round" 
-                  strokeWidth={2} 
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" 
-                />
+              <svg className="mode-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
-              {showSettings ? 'Hide Settings' : 'Customize QR Code'}
+              Generate
             </button>
-            
-            {/* Customization Panel */}
-            {showSettings && (
-              <div className="settings-panel">
-                <div className="settings-header">
-                  <h3>Customization Options</h3>
-                  <button 
-                    className="reset-button"
-                    onClick={resetToDefaults}
-                    title="Reset to defaults"
-                  >
-                    Reset
-                  </button>
-                </div>
-                
-                {/* Presets Section */}
-                <div className="settings-group">
-                  <h4 className="settings-group-title">Quick Presets</h4>
-                  <div className="preset-grid">
-                    {allPresets.map((preset) => (
-                      <div key={preset.id} className="preset-item-wrapper">
-                        <button
-                          className={`preset-button ${activePreset === preset.id ? 'active' : ''} ${!preset.validation.valid ? 'invalid' : ''}`}
-                          onClick={() => applyPreset(preset)}
-                          title={preset.description || preset.name}
-                        >
-                          <span 
-                            className="preset-preview"
-                            style={{ backgroundColor: preset.bgColor }}
-                          >
-                            <span 
-                              className="preset-pattern"
-                              style={{ backgroundColor: preset.fgColor }}
-                            />
-                          </span>
-                          <span className="preset-name">{preset.name}</span>
-                        </button>
-                        {preset.isCustom && (
-                          <button
-                            className="preset-delete"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteCustomPreset(preset.id);
-                            }}
-                            title="Delete preset"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <button 
-                    className="save-preset-button"
-                    onClick={() => setShowSaveModal(true)}
-                  >
-                    <svg 
-                      className="save-preset-icon"
-                      fill="none" 
-                      stroke="currentColor" 
-                      viewBox="0 0 24 24"
-                    >
-                      <path 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round" 
-                        strokeWidth={2} 
-                        d="M12 4v16m8-8H4" 
-                      />
+            <button 
+              className={`mode-button ${showScanner ? 'active' : ''}`}
+              onClick={() => {
+                if (!showScanner) setShowScanner(true);
+              }}
+            >
+              <svg className="mode-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              Scan
+            </button>
+          </div>
+          
+          <div className="input-card">
+            {showScanner ? (
+              /* Scanner Mode - Image Upload Only */
+              <div className="scanner-section">
+                <div className="upload-section">
+                  <label htmlFor="image-upload" className="upload-button">
+                    <svg className="upload-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    Save Custom Preset
-                  </button>
+                    Upload QR Code Image
+                  </label>
+                  <input
+                    id="image-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    className="upload-input"
+                  />
                 </div>
                 
-                {/* Color Settings */}
-                <div className="settings-group">
-                  <h4 className="settings-group-title">Colors</h4>
-                  
-                  <div className="color-input-row">
-                    <div className="color-input-group">
-                      <label htmlFor="fg-color" className="color-label">
-                        Foreground
-                      </label>
-                      <div className="color-picker-wrapper">
+                {scannerError && (
+                  <div className="scanner-error">
+                    <svg className="error-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {scannerError}
+                  </div>
+                )}
+                
+                {scannedData && (
+                  <div className="scanned-result">
+                    <label className="scanned-label">Scanned Content:</label>
+                    <textarea
+                      className="scanned-text"
+                      value={scannedData}
+                      onChange={handleScannedTextChange}
+                      placeholder="Edit scanned content..."
+                    />
+                    <button 
+                      className="use-scanned-button"
+                      onClick={() => {
+                        setInputText(scannedData);
+                        setShowScanner(false);
+                      }}
+                    >
+                      Generate QR Code
+                    </button>
+                  </div>
+                )}
+                
+                <button 
+                  className="close-scanner-button"
+                  onClick={() => setShowScanner(false)}
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              /* Generate Mode */
+              <>
+                <label htmlFor="qr-input" className="input-label">
+                  Enter your text or URL
+                </label>
+                <div className="input-wrapper">
+                  <textarea
+                    id="qr-input"
+                    className={`text-input text-area ${error ? 'error' : ''}`}
+                    placeholder="Type anything here..."
+                    value={inputText}
+                    onChange={handleInputChange}
+                    maxLength={2953}
+                    aria-describedby="input-hint"
+                    rows={3}
+                  />
+                </div>
+                
+                {error && (
+                  <p className="error-message" role="alert">
+                    ⚠️ {error}
+                  </p>
+                )}
+                
+                <p id="input-hint" className="input-hint">
+                  {inputText.length > 0 
+                    ? `${inputText.length} characters`
+                    : 'Enter any text, URL, or data to generate a QR code'}
+                </p>
+                
+                {/* Sample QR Codes */}
+                {!inputText && (
+                  <div className="sample-section">
+                    <p className="sample-label">Try a sample:</p>
+                    <div className="sample-grid">
+                      {SAMPLE_QR_CODES.map((sample) => (
+                        <button
+                          key={sample.id}
+                          className="sample-button"
+                          onClick={() => handleSampleSelect(sample)}
+                        >
+                          <span className="sample-icon">{sample.icon}</span>
+                          <span className="sample-name">{sample.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Customization Panel Toggle */}
+                <button 
+                  className="settings-toggle"
+                  onClick={() => setShowSettings(!showSettings)}
+                  aria-expanded={showSettings}
+                >
+                  <svg 
+                    className={`settings-icon ${showSettings ? 'rotated' : ''}`}
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round" 
+                      strokeWidth={2} 
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" 
+                    />
+                    <path 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round" 
+                      strokeWidth={2} 
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" 
+                    />
+                  </svg>
+                  {showSettings ? 'Hide Settings' : 'Customize QR Code'}
+                </button>
+                
+                {/* Customization Panel */}
+                {showSettings && (
+                  <div className="settings-panel">
+                    <div className="settings-header">
+                      <h3>Customization Options</h3>
+                      <button 
+                        className="reset-button"
+                        onClick={resetToDefaults}
+                        title="Reset to defaults"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    
+                    {/* Presets Section */}
+                    <div className="settings-group">
+                      <h4 className="settings-group-title">Quick Presets</h4>
+                      <div className="preset-grid">
+                        {allPresets.map((preset) => (
+                          <div key={preset.id} className="preset-item-wrapper">
+                            <button
+                              className={`preset-button ${activePreset === preset.id ? 'active' : ''} ${!preset.validation.valid ? 'invalid' : ''}`}
+                              onClick={() => applyPreset(preset)}
+                              title={preset.description || preset.name}
+                            >
+                              <span 
+                                className="preset-preview"
+                                style={{ backgroundColor: preset.bgColor }}
+                              >
+                                <span 
+                                  className="preset-pattern"
+                                  style={{ backgroundColor: preset.fgColor }}
+                                />
+                              </span>
+                              <span className="preset-name">{preset.name}</span>
+                            </button>
+                            {preset.isCustom && (
+                              <button
+                                className="preset-delete"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteCustomPreset(preset.id);
+                                }}
+                                title="Delete preset"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <button 
+                        className="save-preset-button"
+                        onClick={() => setShowSaveModal(true)}
+                      >
+                        <svg 
+                          className="save-preset-icon"
+                          fill="none" 
+                          stroke="currentColor" 
+                          viewBox="0 0 24 24"
+                        >
+                          <path 
+                            strokeLinecap="round" 
+                            strokeLinejoin="round" 
+                            strokeWidth={2} 
+                            d="M12 4v16m8-8H4" 
+                          />
+                        </svg>
+                        Save Custom Preset
+                      </button>
+                    </div>
+                    
+                    {/* Color Settings */}
+                    <div className="settings-group">
+                      <h4 className="settings-group-title">Colors</h4>
+                      
+                      <div className="color-input-row">
+                        <div className="color-input-group">
+                          <label htmlFor="fg-color" className="color-label">
+                            Foreground
+                          </label>
+                          <div className="color-picker-wrapper">
+                            <input
+                              id="fg-color"
+                              type="color"
+                              className="color-picker"
+                              value={fgColor}
+                              onChange={handleFgColorChange}
+                            />
+                            <span className="color-value">{fgColor}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="color-input-group">
+                          <label htmlFor="bg-color" className="color-label">
+                            Background
+                          </label>
+                          <div className="color-picker-wrapper">
+                            <input
+                              id="bg-color"
+                              type="color"
+                              className="color-picker"
+                              value={bgColor}
+                              onChange={handleBgColorChange}
+                            />
+                            <span className="color-value">{bgColor}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {colorValidation.level !== 'success' && (
+                        <div className={`color-warning ${colorValidation.level}`}>
+                          {colorValidation.level === 'error' ? '⚠️ ' : '⚡ '}
+                          {colorValidation.message}
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Size Settings */}
+                    <div className="settings-group">
+                      <h4 className="settings-group-title">Size</h4>
+                      <div className="slider-input-group">
                         <input
-                          id="fg-color"
-                          type="color"
-                          className="color-picker"
-                          value={fgColor}
-                          onChange={handleFgColorChange}
+                          type="range"
+                          className="slider-input"
+                          min="64"
+                          max="512"
+                          step="8"
+                          value={size}
+                          onChange={handleSizeChange}
                         />
-                        <span className="color-value">{fgColor}</span>
+                        <span className="slider-value">{size}px</span>
                       </div>
                     </div>
                     
-                    <div className="color-input-group">
-                      <label htmlFor="bg-color" className="color-label">
-                        Background
-                      </label>
-                      <div className="color-picker-wrapper">
+                    {/* Error Correction Level */}
+                    <div className="settings-group">
+                      <h4 className="settings-group-title">Error Correction</h4>
+                      <div className="radio-group">
+                        {ERROR_CORRECTION_LEVELS.map((level) => (
+                          <label key={level.value} className="radio-label">
+                            <input
+                              type="radio"
+                              name="errorCorrection"
+                              value={level.value}
+                              checked={errorCorrection === level.value}
+                              onChange={handleErrorCorrectionChange}
+                              className="radio-input"
+                            />
+                            <span className="radio-custom"></span>
+                            <span className="radio-content">
+                              <span className="radio-label-text">{level.label}</span>
+                              <span className="radio-description">{level.description}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Border Size */}
+                    <div className="settings-group">
+                      <h4 className="settings-group-title">Border (Quiet Zone)</h4>
+                      <div className="slider-input-group">
                         <input
-                          id="bg-color"
-                          type="color"
-                          className="color-picker"
-                          value={bgColor}
-                          onChange={handleBgColorChange}
+                          type="range"
+                          className="slider-input"
+                          min="0"
+                          max="20"
+                          step="1"
+                          value={borderSize}
+                          onChange={handleBorderChange}
                         />
-                        <span className="color-value">{bgColor}</span>
+                        <span className="slider-value">{borderSize}px</span>
                       </div>
                     </div>
                   </div>
-                  
-                  {colorValidation.level !== 'success' && (
-                    <div className={`color-warning ${colorValidation.level}`}>
-                      {colorValidation.level === 'error' ? '⚠️ ' : '⚡ '}
-                      {colorValidation.message}
-                    </div>
-                  )}
-                </div>
-                
-                {/* Size Settings */}
-                <div className="settings-group">
-                  <h4 className="settings-group-title">Size</h4>
-                  <div className="slider-input-group">
-                    <input
-                      type="range"
-                      className="slider-input"
-                      min="64"
-                      max="512"
-                      step="8"
-                      value={size}
-                      onChange={handleSizeChange}
-                    />
-                    <span className="slider-value">{size}px</span>
-                  </div>
-                </div>
-                
-                {/* Error Correction Level */}
-                <div className="settings-group">
-                  <h4 className="settings-group-title">Error Correction</h4>
-                  <div className="radio-group">
-                    {ERROR_CORRECTION_LEVELS.map((level) => (
-                      <label key={level.value} className="radio-label">
-                        <input
-                          type="radio"
-                          name="errorCorrection"
-                          value={level.value}
-                          checked={errorCorrection === level.value}
-                          onChange={handleErrorCorrectionChange}
-                          className="radio-input"
-                        />
-                        <span className="radio-custom"></span>
-                        <span className="radio-content">
-                          <span className="radio-label-text">{level.label}</span>
-                          <span className="radio-description">{level.description}</span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* Border Size */}
-                <div className="settings-group">
-                  <h4 className="settings-group-title">Border (Quiet Zone)</h4>
-                  <div className="slider-input-group">
-                    <input
-                      type="range"
-                      className="slider-input"
-                      min="0"
-                      max="20"
-                      step="1"
-                      value={borderSize}
-                      onChange={handleBorderChange}
-                    />
-                    <span className="slider-value">{borderSize}px</span>
-                  </div>
-                </div>
-              </div>
+                )}
+              </>
             )}
           </div>
         </section>
@@ -694,7 +881,9 @@ function App() {
             ) : (
               <div className="qr-placeholder">
                 {inputText.length === 0 
-                  ? 'Enter text to see QR code' 
+                  ? showScanner 
+                    ? 'Upload an image to scan QR code'
+                    : 'Enter text to see QR code'
                   : 'Invalid input'}
               </div>
             )}
@@ -769,7 +958,30 @@ function App() {
       
       {/* Footer */}
       <footer className="app-footer">
-        <p>Built with React & qrcode.react • Customizable QR Code Generator</p>
+        <div className="footer-content">
+          <div className="footer-profile">
+            <img 
+              src="./images/IMG_20260328_094733_165.jpg" 
+              alt="Ian Mbae" 
+              className="footer-avatar"
+            />
+            <div className="footer-info">
+              <span className="footer-name">Ian Mbae</span>
+              <a 
+                href="https://www.linkedin.com/in/ianmbae/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="footer-linkedin"
+              >
+                <svg className="linkedin-icon" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                </svg>
+                Connect on LinkedIn
+              </a>
+            </div>
+          </div>
+          <p className="footer-copyright">© 2026 QR Code Generator</p>
+        </div>
       </footer>
     </div>
   );
