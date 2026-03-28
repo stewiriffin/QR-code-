@@ -961,7 +961,7 @@ function App() {
         <div className="footer-content">
           <div className="footer-profile">
             <img 
-              src="./images/IMG_20260328_094733_165.jpg" 
+              src="/images/IMG_20260328_094733_165.jpg" 
               alt="Ian Mbae" 
               className="footer-avatar"
             />
